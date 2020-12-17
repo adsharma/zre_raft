@@ -110,42 +110,42 @@ class ZRENode:
 
     async def handle_shout(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
-        name = cmds.pop(0)
+        name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
         msg = cmds.pop(0).decode("utf-8")
-        print(f"{peer}: {group} {msg}")
+        print(f"{name} {group}: {msg}")
 
     async def handle_whisper(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
-        name = cmds.pop(0)
+        name = cmds.pop(0).decode("utf-8")
         print(f"{peer}: {cmds}")
 
     async def handle_enter(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
-        name = cmds.pop(0)
+        name = cmds.pop(0).decode("utf-8")
         headers = json.loads(cmds.pop(0).decode("utf-8"))
         logger.debug(headers)
-        self.peers[peer] = [cmds, headers]
-        print(f"{peer} entered")
+        self.peers[peer] = [name, cmds, headers]
+        print(f"{name} {peer} entered")
 
     async def handle_join(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
-        name = cmds.pop(0)
+        name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].append(peer)
-        print(f"{peer} joined {group}")
+        print(f"{name} {peer} joined {group}")
         print(self.peers, self.groups)
 
     async def handle_leave(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
-        name = cmds.pop(0)
+        name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].remove(peer)
         print(f"{peer} left {group}")
 
     async def handle_exit(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
-        name = cmds.pop(0)
+        name = cmds.pop(0).decode("utf-8")
         self.peers.pop(peer, None)
         print(f"{peer} exit ")
         for g in self.groups:
