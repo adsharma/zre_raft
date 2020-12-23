@@ -10,7 +10,6 @@ except Exception as e:
 from aiostream.stream import ziplatest
 from aiostream.aiter_utils import aitercontext
 from collections import defaultdict
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import PromptSession
 
@@ -27,7 +26,14 @@ import uuid
 import zmq
 import zmq.asyncio
 import zre_raft
-from zre_signal import b64k, SignalState
+
+try:
+    from zre_signal import b64k, SignalState
+
+    DISABLE_SIGNAL = False
+except Exception as e:
+    print("Encryption disabled")
+    DISABLE_SIGNAL = True
 
 
 exit_event = threading.Event()
@@ -39,6 +45,7 @@ class ZRENode:
     def __init__(self, name):
         self.peers = {}
         self.directory = {}  # peer by name. Should use consensus to maintain
+        self.signal = None
         self.create_node(name)
         self.groups = defaultdict(list)
         self.queue = asyncio.Queue()
@@ -60,12 +67,13 @@ class ZRENode:
 
     def create_node(self, name: str):
         self.n = n = Pyre(name)
-        self.n.signal = SignalState(logger)
-        # Convenience members self.signal/peer_keys
-        self.signal = self.n.signal
-        self.peer_keys = self.signal.peer_keys
         n.set_header("Version", str(zre_raft.__version__))
-        self.create_signal_headers()
+        if not DISABLE_SIGNAL:
+            self.n.signal = SignalState(logger)
+            # Convenience members self.signal/peer_keys
+            self.signal = self.n.signal
+            self.peer_keys = self.signal.peer_keys
+            self.create_signal_headers()
         n.join(ZRENode.GROUP)
         n.start()
         return n
@@ -82,6 +90,9 @@ class ZRENode:
             else:
                 print("syntax: /whisper peer message")
         elif cmd == "/encrypt":
+            if DISABLE_SIGNAL:
+                print("Encryption disabled. Can't encrypt")
+                return
             out = rest.split(" ", maxsplit=1)
             if len(out) == 2:
                 target, rest = out
@@ -91,11 +102,8 @@ class ZRENode:
             else:
                 print("syntax: /encrypt peer message")
         elif cmd == "/ephemeral":
-            if rest:
-                self.peer_keys[peer]["EK"] = X25519PublicKey.from_public_bytes(
-                    base64.b64decode(rest)
-                )
-                self.signal._on_message_receive(peer)
+            if rest and self.signal:
+                self.signal._on_message_receive(peer, rest)
             else:
                 print("syntax: /ephemeral key")
 
@@ -178,11 +186,8 @@ class ZRENode:
         peer = self.peers[peer_id]
         headers = peer[2]
         logger.debug(headers)
-        for key in ["IK", "SPK", "OPK"]:
-            self.peer_keys[peer_id][key] = X25519PublicKey.from_public_bytes(
-                base64.b64decode(headers[key])
-            )
-        self.peer_keys[peer_id]["peer"] = peer_id
+        if self.signal:
+            self.signal._on_peer_enter(peer_id, headers)
 
     async def handle_enter(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))

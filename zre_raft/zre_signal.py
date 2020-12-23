@@ -2,7 +2,7 @@ import base64
 
 from collections import defaultdict
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
     Ed25519PrivateKey,
@@ -113,11 +113,21 @@ class SignalState:
         self.x3dh_sender(self.peer_keys[peer_id])
         self.init_ratchets()
 
-    def _on_message_receive(self, peer_id):
+    def _on_message_receive(self, peer_id, rest):
+        self.peer_keys[peer_id]["EK"] = X25519PublicKey.from_public_bytes(
+            base64.b64decode(rest)
+        )
         if peer_id in self.sessions:
             return
         self.x3dh_receiver(self.peer_keys[peer_id])
         self.init_ratchets()
+
+    def _on_peer_enter(self, peer_id, headers):
+        for key in ["IK", "SPK", "OPK"]:
+            self.peer_keys[peer_id][key] = X25519PublicKey.from_public_bytes(
+                base64.b64decode(headers[key])
+            )
+        self.peer_keys[peer_id]["peer"] = peer_id
 
     def init_ratchets(self):
         # initialise the root chain with the shared key
