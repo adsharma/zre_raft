@@ -62,13 +62,14 @@ class SymmRatchet(object):
 
 
 class SignalState:
-    def __init__(self):
+    def __init__(self, logger):
         self.IK = X25519PrivateKey.generate()
         self.SPK = X25519PrivateKey.generate()
         self.OPK = X25519PrivateKey.generate()
         self.DHratchet = X25519PrivateKey.generate()
         self.peer_keys = defaultdict(dict)
         self.sessions = {}
+        self.logger = logger
 
     def x3dh_receiver(self, other):
         # perform the 4 Diffie Hellman exchanges (X3DH)
@@ -80,8 +81,10 @@ class SignalState:
         # print("receiver: ", EK.public_bytes(), dh1, dh2, dh3, dh4)
         # the shared key is KDF(DH1||DH2||DH3||DH4)
         self.sk = shared_key = hkdf(dh1 + dh2 + dh3 + dh4, 32)
-        self.sessions[other["peer"]] = shared_key
-        print(self.sessions)
+        peer = other["peer"]
+        self.sessions[peer] = shared_key
+        self.logger.info(f"Established session with: {peer}")
+        self.logger.debug(f"Shared key: {shared_key}")
 
     def x3dh_sender(self, other):
         # perform the 4 Diffie Hellman exchanges (X3DH)
@@ -92,8 +95,10 @@ class SignalState:
         # print("sender: ", self.EK.public_key().public_bytes(), dh1, dh2, dh3, dh4)
         # the shared key is KDF(DH1||DH2||DH3||DH4)
         self.sk = shared_key = hkdf(dh1 + dh2 + dh3 + dh4, 32)
-        self.sessions[other["peer"]] = shared_key
-        print(self.sessions)
+        peer = other["peer"]
+        self.sessions[peer] = shared_key
+        self.logger.info(f"Established session with: {peer}")
+        self.logger.debug(f"Shared key: {shared_key}")
 
     def establish_session(self, n, other, message):
         self.EK = EK = X25519PrivateKey.generate()

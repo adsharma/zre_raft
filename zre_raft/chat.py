@@ -10,10 +10,7 @@ except Exception as e:
 from aiostream.stream import ziplatest
 from aiostream.aiter_utils import aitercontext
 from collections import defaultdict
-from cryptography.hazmat.primitives.asymmetric.x25519 import (
-    X25519PrivateKey,
-    X25519PublicKey,
-)
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import PromptSession
 
@@ -63,7 +60,7 @@ class ZRENode:
 
     def create_node(self, name: str):
         self.n = n = Pyre(name)
-        self.n.signal = SignalState()
+        self.n.signal = SignalState(logger)
         # Convenience members self.signal/peer_keys
         self.signal = self.n.signal
         self.peer_keys = self.signal.peer_keys
@@ -75,7 +72,6 @@ class ZRENode:
 
     async def handle_command(self, command, peer=None):
         cmd, rest = command.split(" ", maxsplit=1)
-        print("command: ", cmd, rest, peer)
         if cmd == "/whisper":
             out = rest.split(" ", maxsplit=1)
             if len(out) == 2:
@@ -181,7 +177,7 @@ class ZRENode:
     async def _on_enter(self, peer_id):
         peer = self.peers[peer_id]
         headers = peer[2]
-        print(headers)
+        logger.debug(headers)
         for key in ["IK", "SPK", "OPK"]:
             self.peer_keys[peer_id][key] = X25519PublicKey.from_public_bytes(
                 base64.b64decode(headers[key])
@@ -204,7 +200,7 @@ class ZRENode:
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].append(peer)
         print(f"{name} {peer} joined {group}")
-        print(self.peers, self.groups)
+        logger.debug(f"Config: {self.peers}, {self.groups}")
 
     async def handle_leave(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
@@ -220,7 +216,7 @@ class ZRENode:
         print(f"{peer} exit ")
         for g in self.groups:
             self.groups[g].remove(peer)
-        print(self.peers, self.groups)
+        logger.debug(f"Config: {self.peers}, {self.groups}")
 
     async def networkstream(self, queue):
         seq = 0
@@ -265,10 +261,14 @@ def main():
     global logger
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--name", help="chat client name")
+    parser.add_argument("-v", "--verbose", help="verbose logging")
     args = parser.parse_args()
     # Create a StreamHandler for debugging
     logger = logging.getLogger("raft")
-    logger.setLevel(logging.INFO)
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
     logger.addHandler(logging.StreamHandler())
     logger.propagate = False
 
