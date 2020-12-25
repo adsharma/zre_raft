@@ -32,7 +32,7 @@ try:
 
     DISABLE_SIGNAL = False
 except Exception as e:
-    print("Encryption disabled")
+    print("Encryption disabled", e)
     DISABLE_SIGNAL = True
 
 
@@ -52,6 +52,7 @@ class ZRENode:
         self.ctx = zmq.asyncio.Context()
         self.pipe1, self.pipe2 = self.zcreate_pipe(self.ctx)
         self.session = PromptSession(f"{self.n.name()} {self.GROUP}: ")
+        self.pending_messages = {}
 
         self.threads = []
         t = threading.Thread(target=self.worker, args=[self.pipe2, self.queue])
@@ -79,6 +80,7 @@ class ZRENode:
         return n
 
     async def handle_command(self, command, peer=None):
+        logger.debug(f"{peer}: {command}")
         cmd, rest = command.split(" ", maxsplit=1)
         if cmd == "/whisper":
             out = rest.split(" ", maxsplit=1)
@@ -98,14 +100,30 @@ class ZRENode:
                 target, rest = out
                 if target in self.directory:
                     target = self.directory[target]
-                self.n.signal.establish_session(self.n, target, rest.encode("utf-8"))
+                if target not in self.n.signal.sessions:
+                    self.n.signal.establish_session(self.n, target)
+                    self.pending_messages[target] = rest
+                else:
+                    self.n.signal.send(self.n, target, rest.encode("utf-8"))
             else:
                 print("syntax: /encrypt peer message")
-        elif cmd == "/ephemeral":
+
+    async def handle_incoming_command(self, command, peer=None):
+        logger.debug(f"{peer}: {command}")
+        cmd, rest = command.split(" ", maxsplit=1)
+        if cmd == "/ephemeral":
             if rest and self.signal:
-                self.signal._on_message_receive(peer, rest)
+                self.signal._on_new_session(self.n, peer, rest)
             else:
                 print("syntax: /ephemeral key")
+        elif cmd == "/dhkey":
+            if rest and self.signal:
+                self.signal._on_dhkey(peer, rest)
+                if peer in self.pending_messages:
+                    message = self.pending_messages.pop(peer)
+                    self.n.signal.send(self.n, peer, message.encode("utf-8"))
+            else:
+                print("syntax: /dhkey key")
 
     async def chat_task(self, pipe, queue):
         n = self.n
@@ -175,11 +193,17 @@ class ZRENode:
     async def handle_whisper(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
         name = cmds.pop(0).decode("utf-8")
-        message = cmds.pop(0).decode("utf-8")
+        raw_message = cmds.pop(0)
+        try:
+            message = raw_message.decode("utf-8")
+        except UnicodeDecodeError:
+            message = None
         if message and message[0] == "/":
             # special commands
-            await self.handle_command(message, peer)
+            await self.handle_incoming_command(message, peer)
         else:
+            if self.signal and peer in self.signal.sessions:
+                message = self.signal.recv(peer, raw_message).decode("utf-8")
             print(f"{name}: {message}")
 
     async def _on_enter(self, peer_id):

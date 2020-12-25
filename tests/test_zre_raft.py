@@ -5,7 +5,7 @@
 
 import unittest
 
-from zre_raft import zre_raft
+from zre_raft import chat
 
 
 class TestZre_raft(unittest.TestCase):

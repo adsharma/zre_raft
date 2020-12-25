@@ -2,3 +2,6 @@ prompt_toolkit>=3.0.7
 aiostream>=0.4.1
 pyre>=0.3.2
 pyzmq>=20.0.0
+cryptography==2.8
+pycrypto
+pyserde
