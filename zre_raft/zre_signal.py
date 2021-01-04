@@ -57,7 +57,7 @@ class SessionState:
     recv_ratchet: Optional[SymmRatchet]
 
     @classmethod
-    def new(object):
+    def new(cls):
         """
         Generate a new default state
         """

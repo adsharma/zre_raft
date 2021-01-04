@@ -2,7 +2,7 @@
 
 
 try:
-    from zyre_pyzmq import Zyre as Pyre
+    from zyre_pyzmq import Zyre as Pyre  # type: ignore
 except Exception as e:
     print("using Python native module")
     from pyre import Pyre
@@ -12,6 +12,11 @@ from aiostream.aiter_utils import aitercontext
 from collections import defaultdict
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import PromptSession
+
+from simpleRaft.servers.zre_server import ZREServer as Raft
+from simpleRaft.states.candidate import Candidate
+from simpleRaft.states.leader import Leader
+from simpleRaft.states.follower import Follower
 
 import argparse
 import asyncio
@@ -28,7 +33,7 @@ import zmq.asyncio
 import zre_raft
 
 try:
-    from zre_signal import b64k, SignalState
+    from zre_raft.zre_signal import b64k, SignalState
 
     DISABLE_SIGNAL = False
 except Exception as e:
@@ -47,6 +52,8 @@ class ZRENode:
         self.directory = {}  # peer by name. Should use consensus to maintain
         self.signal = None
         self.create_node(name)
+        role = random.choice([Follower, Follower, Candidate])
+        self.consensus = Raft(name, role(), self.n)
         self.groups = defaultdict(list)
         self.queue = asyncio.Queue()
         self.ctx = zmq.asyncio.Context()
@@ -79,7 +86,8 @@ class ZRENode:
         n.start()
         return n
 
-    async def handle_command(self, command, peer=None):
+    async def handle_outgoing_command(self, raw_command, peer=None):
+        command = raw_command.decode("utf-8")
         logger.debug(f"{peer}: {command}")
         cmd, rest = command.split(" ", maxsplit=1)
         if cmd == "/whisper":
@@ -107,8 +115,17 @@ class ZRENode:
                     self.n.signal.send(self.n, target, rest.encode("utf-8"))
             else:
                 print("syntax: /encrypt peer message")
+        elif cmd == "/raft":
+            prefix_len = len("/raft ")
+            self.consensus.send_message(raw_command[prefix_len:])
+        else:
+            raise Exception(f"unknown cmd: {command}")
 
-    async def handle_incoming_command(self, command, peer=None):
+    async def handle_incoming_command(self, raw_command, peer=None):
+        try:
+            command = raw_command.decode("utf-8")
+        except UnicodeDecodeError:
+            command = None
         logger.debug(f"{peer}: {command}")
         cmd, rest = command.split(" ", maxsplit=1)
         if cmd == "/ephemeral":
@@ -124,6 +141,11 @@ class ZRENode:
                     self.n.signal.send(self.n, peer, message.encode("utf-8"))
             else:
                 print("syntax: /dhkey key")
+        elif cmd == "/raft":
+            prefix_len = len("/raft ")
+            self.consensus.receive_message(raw_command[prefix_len:])
+        else:
+            raise Exception(f"unknown cmd: {command}")
 
     async def chat_task(self, pipe, queue):
         n = self.n
@@ -135,11 +157,11 @@ class ZRENode:
             if not len(items):
                 continue
             if pipe in items and items[pipe] == zmq.POLLIN:
-                message = await pipe.recv()
-                message = message.decode("utf-8")
+                raw_message = await pipe.recv()
+                message = raw_message.decode("utf-8")
                 if message and message[0] == "/":
                     # special commands
-                    await self.handle_command(message)
+                    await self.handle_outgoing_command(raw_message)
                 else:
                     n.shouts(ZRENode.GROUP, message)
             else:
@@ -187,8 +209,16 @@ class ZRENode:
         peer = uuid.UUID(bytes=cmds.pop(0))
         name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
-        msg = cmds.pop(0).decode("utf-8")
-        print(f"{name} {group}: {msg}")
+        raw_message = cmds.pop(0)
+        try:
+            message = raw_message.decode("utf-8")
+        except UnicodeDecodeError:
+            message = None
+        if message and message[0] == "/":
+            # special commands
+            await self.handle_incoming_command(raw_message, peer)
+        else:
+            print(f"{name} {group}: {message}")
 
     async def handle_whisper(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
@@ -200,7 +230,7 @@ class ZRENode:
             message = None
         if message and message[0] == "/":
             # special commands
-            await self.handle_incoming_command(message, peer)
+            await self.handle_incoming_command(raw_message, peer)
         else:
             if self.signal and peer in self.signal.sessions:
                 message = self.signal.recv(peer, raw_message).decode("utf-8")
@@ -228,6 +258,7 @@ class ZRENode:
         name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].append(peer)
+        self.consensus.add_neighbor(peer)
         print(f"{name} {peer} joined {group}")
         logger.debug(f"Config: {self.peers}, {self.groups}")
 
@@ -236,6 +267,8 @@ class ZRENode:
         name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].remove(peer)
+        self.consensus.remove_neighbor(peer)
+        print(f"{name} {peer} left {group}")
         print(f"{peer} left {group}")
 
     async def handle_exit(self, cmds):
@@ -245,6 +278,7 @@ class ZRENode:
         print(f"{peer} exit ")
         for g in self.groups:
             self.groups[g].remove(peer)
+            self.consensus.remove_neighbor(peer)
         logger.debug(f"Config: {self.peers}, {self.groups}")
 
     async def networkstream(self, queue):
