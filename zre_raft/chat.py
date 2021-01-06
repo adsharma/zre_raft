@@ -122,6 +122,12 @@ class ZRENode:
             raise Exception(f"unknown cmd: {command}")
 
     async def handle_incoming_command(self, raw_command, peer=None):
+        # we handle this in a special way since the raw bytes
+        # can not always be decoded as utf-8
+        prefix_len = len("/raft ")
+        if raw_command[:prefix_len] == b"/raft ":
+            await self.consensus.receive_message(raw_command[prefix_len:])
+            return
         try:
             command = raw_command.decode("utf-8")
         except UnicodeDecodeError:
@@ -141,9 +147,6 @@ class ZRENode:
                     self.n.signal.send(self.n, peer, message.encode("utf-8"))
             else:
                 print("syntax: /dhkey key")
-        elif cmd == "/raft":
-            prefix_len = len("/raft ")
-            self.consensus.receive_message(raw_command[prefix_len:])
         else:
             raise Exception(f"unknown cmd: {command}")
 
@@ -210,30 +213,33 @@ class ZRENode:
         name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
         raw_message = cmds.pop(0)
-        try:
-            message = raw_message.decode("utf-8")
-        except UnicodeDecodeError:
-            message = None
-        if message and message[0] == "/":
+        if raw_message and raw_message[0] == ord('/'):
             # special commands
             await self.handle_incoming_command(raw_message, peer)
         else:
+            try:
+                message = raw_message.decode("utf-8")
+            except UnicodeDecodeError:
+                message = None
+
             print(f"{name} {group}: {message}")
 
     async def handle_whisper(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
         name = cmds.pop(0).decode("utf-8")
         raw_message = cmds.pop(0)
-        try:
-            message = raw_message.decode("utf-8")
-        except UnicodeDecodeError:
-            message = None
-        if message and message[0] == "/":
+        if raw_message and raw_message[0] == ord('/'):
             # special commands
             await self.handle_incoming_command(raw_message, peer)
         else:
             if self.signal and peer in self.signal.sessions:
                 message = self.signal.recv(peer, raw_message).decode("utf-8")
+            else:
+                try:
+                    message = raw_message.decode("utf-8")
+                except UnicodeDecodeError:
+                    message = None
+
             print(f"{name}: {message}")
 
     async def _on_enter(self, peer_id):
