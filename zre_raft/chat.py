@@ -117,7 +117,8 @@ class ZRENode:
                 print("syntax: /encrypt peer message")
         elif cmd == "/raft":
             prefix_len = len("/raft ")
-            self.consensus.send_message(raw_command[prefix_len:])
+            if self.consensus:
+                self.consensus.send_message(raw_command[prefix_len:])
         else:
             raise Exception(f"unknown cmd: {command}")
 
@@ -126,7 +127,8 @@ class ZRENode:
         # can not always be decoded as utf-8
         prefix_len = len("/raft ")
         if raw_command[:prefix_len] == b"/raft ":
-            await self.consensus.receive_message(raw_command[prefix_len:])
+            if self.consensus:
+                await self.consensus.receive_message(raw_command[prefix_len:])
             return
         try:
             command = raw_command.decode("utf-8")
@@ -264,7 +266,8 @@ class ZRENode:
         name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].append(peer)
-        self.consensus.add_neighbor(peer)
+        if self.consensus:
+            self.consensus.add_neighbor(peer)
         print(f"{name} {peer} joined {group}")
         logger.debug(f"Config: {self.peers}, {self.groups}")
 
@@ -273,7 +276,8 @@ class ZRENode:
         name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].remove(peer)
-        self.consensus.remove_neighbor(peer)
+        if self.consensus:
+            self.consensus.remove_neighbor(peer)
         print(f"{name} {peer} left {group}")
         print(f"{peer} left {group}")
 
@@ -284,7 +288,8 @@ class ZRENode:
         print(f"{peer} exit ")
         for g in self.groups:
             self.groups[g].remove(peer)
-            self.consensus.remove_neighbor(peer)
+            if self.consensus:
+                self.consensus.remove_neighbor(peer)
         logger.debug(f"Config: {self.peers}, {self.groups}")
 
     async def networkstream(self, queue):
