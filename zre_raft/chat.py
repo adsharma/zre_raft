@@ -13,11 +13,6 @@ from collections import defaultdict
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import PromptSession
 
-from simpleRaft.servers.zre_server import ZREServer as Raft
-from simpleRaft.states.candidate import Candidate
-from simpleRaft.states.leader import Leader
-from simpleRaft.states.follower import Follower
-
 import argparse
 import asyncio
 import base64
@@ -40,6 +35,17 @@ except Exception as e:
     print("Encryption disabled", e)
     DISABLE_SIGNAL = True
 
+try:
+    from simpleRaft.servers.zre_server import ZREServer as Raft
+    from simpleRaft.states.candidate import Candidate
+    from simpleRaft.states.leader import Leader
+    from simpleRaft.states.follower import Follower
+
+    DISABLE_CONSENSUS = False
+except Exception as e:
+    print("Consensus disabled", e)
+    DISABLE_CONSENSUS = True
+
 
 exit_event = threading.Event()
 
@@ -52,8 +58,11 @@ class ZRENode:
         self.directory = {}  # peer by name. Should use consensus to maintain
         self.signal = None
         self.create_node(name)
-        role = random.choice([Follower, Follower, Candidate])
-        self.consensus = Raft(name, role(), self.n)
+        if DISABLE_CONSENSUS:
+            self.consensus = None
+        else:
+            role = random.choice([Follower, Follower, Candidate])
+            self.consensus = Raft(name, role(), self.n)
         self.groups = defaultdict(list)
         self.queue = asyncio.Queue()
         self.ctx = zmq.asyncio.Context()
@@ -223,7 +232,7 @@ class ZRENode:
         name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
         raw_message = cmds.pop(0)
-        if raw_message and raw_message[0] == ord('/'):
+        if raw_message and raw_message[0] == ord("/"):
             # special commands
             await self.handle_incoming_command(raw_message, peer)
         else:
@@ -238,7 +247,7 @@ class ZRENode:
         peer = uuid.UUID(bytes=cmds.pop(0))
         name = cmds.pop(0).decode("utf-8")
         raw_message = cmds.pop(0)
-        if raw_message and raw_message[0] == ord('/'):
+        if raw_message and raw_message[0] == ord("/"):
             # special commands
             await self.handle_incoming_command(raw_message, peer)
         else:
