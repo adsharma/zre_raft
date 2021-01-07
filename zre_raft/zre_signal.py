@@ -51,6 +51,7 @@ class SymmRatchet:
 class SessionState:
     state: RatchetState
     shared_key: bytes
+    dh_ratchet: Optional[X25519PrivateKey]
     dh_public_key: Optional[X25519PublicKey]
     root_ratchet: Optional[SymmRatchet]
     send_ratchet: Optional[SymmRatchet]
@@ -61,7 +62,7 @@ class SessionState:
         """
         Generate a new default state
         """
-        return SessionState(RatchetState.INIT, b"", None, None, None, None)
+        return SessionState(RatchetState.INIT, b"", None, None, None, None, None)
 
 
 def b64(msg: bytes) -> str:
@@ -105,7 +106,6 @@ class SignalState:
         self.IK = X25519PrivateKey.generate()
         self.SPK = X25519PrivateKey.generate()
         self.OPK = X25519PrivateKey.generate()
-        self.DHratchet = None
         self.peer_keys = defaultdict(dict)
         self.sessions = defaultdict(lambda: SessionState.new())
         self.logger = logger
@@ -118,8 +118,7 @@ class SignalState:
         dh3 = self.SPK.exchange(EK)
         dh4 = self.OPK.exchange(EK)
         # the shared key is KDF(DH1||DH2||DH3||DH4)
-        # TODO: use self.sessions[peer] instead of self.sk to avoid races
-        self.sk = shared_key = hkdf(dh1 + dh2 + dh3 + dh4, 32)
+        shared_key = hkdf(dh1 + dh2 + dh3 + dh4, 32)
         peer = other["peer"]
         self.sessions[peer].shared_key = shared_key
         self.logger.info(f"Established session with: {peer}")
@@ -132,7 +131,7 @@ class SignalState:
         dh3 = self.EK.exchange(other["SPK"])
         dh4 = self.EK.exchange(other["OPK"])
         # the shared key is KDF(DH1||DH2||DH3||DH4)
-        self.sk = shared_key = hkdf(dh1 + dh2 + dh3 + dh4, 32)
+        shared_key = hkdf(dh1 + dh2 + dh3 + dh4, 32)
         peer = other["peer"]
         self.sessions[peer].shared_key = shared_key
         self.logger.info(f"Established session with: {peer}")
@@ -159,8 +158,8 @@ class SignalState:
             return
         self.x3dh_receiver(self.peer_keys[peer_id])
         self.init_ratchets(peer_id, sender=False)
-        self.DHratchet = X25519PrivateKey.generate()
-        dh_key = b64k(self.DHratchet.public_key())
+        self.sessions[peer_id].dh_ratchet = dh_ratchet = X25519PrivateKey.generate()
+        dh_key = b64k(dh_ratchet.public_key())
         message = " ".join(["/dhkey", dh_key])
         n.whisper(peer_id, message.encode("utf-8"))
 
@@ -183,7 +182,8 @@ class SignalState:
 
     def init_ratchets(self, peer_id, sender: bool):
         # initialise the root chain with the shared key
-        self.sessions[peer_id].root_ratchet = root_ratchet = SymmRatchet(self.sk)
+        shared_key = self.sessions[peer_id].shared_key
+        self.sessions[peer_id].root_ratchet = root_ratchet = SymmRatchet(shared_key)
         # initialise the sending and recving chains
         if sender:
             send_ratchet = SymmRatchet(root_ratchet.next()[0])
@@ -203,18 +203,19 @@ class SignalState:
         root_ratchet = self.sessions[peer_id].root_ratchet
         shared_recv = b""
         # perform a DH ratchet rotation using Other User's public key
-        if self.DHratchet is not None:
+        dh_ratchet = self.sessions[peer_id].dh_ratchet
+        if dh_ratchet is not None:
             # First time we don't have a DH ratchet yet, so we do this only
             # on subsequent ratchets
-            dh_recv = self.DHratchet.exchange(peer_public)
+            dh_recv = dh_ratchet.exchange(peer_public)
             shared_recv = root_ratchet.next(dh_recv)[0]
             # use Other User's public and our old private key
             # to get a new recv ratchet
             self.sessions[peer_id].recv_ratchet = SymmRatchet(shared_recv)
         # generate a new key pair and send ratchet
         # our new public key will be sent with the next message to Other User
-        self.DHratchet = X25519PrivateKey.generate()
-        dh_send = self.DHratchet.exchange(peer_public)
+        self.sessions[peer_id].dh_ratchet = dh_ratchet = X25519PrivateKey.generate()
+        dh_send = dh_ratchet.exchange(peer_public)
         shared_send = root_ratchet.next(dh_send)[0]
         self.sessions[peer_id].send_ratchet = SymmRatchet(shared_send)
         self.logger.debug(
@@ -230,8 +231,9 @@ class SignalState:
         self.logger.debug(f"send_ratchet: {peer_id} {b64(send_ratchet.state)}")
         cipher = AES.new(key, AES.MODE_CBC, iv).encrypt(pad(msg))
         self.logger.debug(f"cipher: {cipher}")
+        dh_ratchet = self.sessions[peer_id].dh_ratchet
         encrypted_message = EncryptedMessage(
-            b64(cipher), b64k(self.DHratchet.public_key())
+            b64(cipher), b64k(dh_ratchet.public_key())
         )
         n.whisper(peer_id, to_msgpack(encrypted_message))
 
