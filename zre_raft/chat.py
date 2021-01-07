@@ -89,7 +89,12 @@ class ZRENode:
     async def handle_outgoing_command(self, raw_command, peer=None):
         command = raw_command.decode("utf-8")
         logger.debug(f"{peer}: {command}")
-        cmd, rest = command.split(" ", maxsplit=1)
+        split_command = command.split(" ", maxsplit=1)
+        if len(split_command) == 2:
+            cmd, rest = split_command
+        else:
+            cmd = split_command[0]
+            rest = None
         if cmd == "/whisper":
             out = rest.split(" ", maxsplit=1)
             if len(out) == 2:
@@ -119,6 +124,9 @@ class ZRENode:
             prefix_len = len("/raft ")
             if self.consensus:
                 self.consensus.send_message(raw_command[prefix_len:])
+        elif cmd == "/status":
+            print(f"{self.n.uuid()}")
+            print(f"consensus: {self.consensus}")
         else:
             raise Exception(f"unknown cmd: {command}")
 
