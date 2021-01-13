@@ -36,6 +36,7 @@ except Exception as e:
     DISABLE_SIGNAL = True
 
 try:
+    from simpleRaft.boards.db_board import DBBoard
     from simpleRaft.servers.zre_server import ZREServer as Raft
     from simpleRaft.states.candidate import Candidate
     from simpleRaft.states.leader import Leader
@@ -53,7 +54,7 @@ exit_event = threading.Event()
 class ZRENode:
     GROUP = "raft"
 
-    def __init__(self, name):
+    def __init__(self, name, board=None):
         self.peers = {}
         self.directory = {}  # peer by name. Should use consensus to maintain
         self.signal = None
@@ -61,8 +62,11 @@ class ZRENode:
         if DISABLE_CONSENSUS:
             self.consensus = None
         else:
-            role = random.choice([Follower, Follower, Candidate])
-            self.consensus = Raft(name, role(), self.n)
+            opts = {}
+            if board == "db":
+                opts["messageBoard"] = DBBoard(prefix=f"/tmp/{name}")
+
+            self.consensus = Raft(name, Follower(), self.n, **opts)
         self.groups = defaultdict(list)
         self.queue = asyncio.Queue()
         self.ctx = zmq.asyncio.Context()
@@ -353,7 +357,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--name", help="chat client name")
     parser.add_argument("-v", "--verbose", help="verbose logging")
-    args = parser.parse_args()
+    parser.add_argument("-b", "--board", default="db", help="type of message board")
+
+    args, rest = parser.parse_known_args()
     # Create a StreamHandler for debugging
     logger = logging.getLogger("raft")
     if args.verbose:
@@ -363,7 +369,7 @@ def main():
     logger.addHandler(logging.StreamHandler())
     logger.propagate = False
 
-    node = ZRENode(args.name)
+    node = ZRENode(args.name, args.board)
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(async_main(node.pipe1, node))
