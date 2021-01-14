@@ -117,6 +117,18 @@ class ZRENode:
                 self.n.whisper(target, rest.encode("utf-8"))
             else:
                 print("syntax: /whisper peer message")
+        elif cmd == "/set":
+            out = rest.split(" ", maxsplit=1)
+            if len(out) == 2:
+                key, value = out
+                await self.consensus.set(key, value)
+            else:
+                print("syntax: /set key value")
+        elif cmd == "/get":
+            key = rest
+            value = await self.consensus.get(key)
+            if value is not None:
+                print(value)
         elif cmd == "/encrypt":
             if DISABLE_SIGNAL:
                 print("Encryption disabled. Can't encrypt")
