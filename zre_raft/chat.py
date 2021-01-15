@@ -300,7 +300,7 @@ class ZRENode:
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].append(peer)
         if self.consensus:
-            self.consensus.add_neighbor(peer)
+            self.consensus.add_neighbor(peer.hex)
         print(f"{name} {peer} joined {group}")
         logger.debug(f"Config: {self.peers}, {self.groups}")
 
@@ -310,7 +310,7 @@ class ZRENode:
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].remove(peer)
         if self.consensus:
-            self.consensus.remove_neighbor(peer)
+            self.consensus.remove_neighbor(peer.hex)
         print(f"{name} {peer} left {group}")
         print(f"{peer} left {group}")
 
@@ -322,7 +322,7 @@ class ZRENode:
         for g in self.groups:
             self.groups[g].remove(peer)
             if self.consensus:
-                self.consensus.remove_neighbor(peer)
+                self.consensus.remove_neighbor(peer.hex)
         logger.debug(f"Config: {self.peers}, {self.groups}")
 
     async def networkstream(self, queue):
