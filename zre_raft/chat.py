@@ -36,11 +36,11 @@ except Exception as e:
     DISABLE_SIGNAL = True
 
 try:
-    from simpleRaft.boards.db_board import DBBoard
-    from simpleRaft.servers.zre_server import ZREServer as Raft
-    from simpleRaft.states.candidate import Candidate
-    from simpleRaft.states.leader import Leader
-    from simpleRaft.states.follower import Follower
+    from raft.boards.db_board import DBBoard
+    from raft.servers.zre_server import ZREServer as Raft
+    from raft.states.candidate import Candidate
+    from raft.states.leader import Leader
+    from raft.states.follower import Follower
 
     DISABLE_CONSENSUS = False
 except Exception as e:
