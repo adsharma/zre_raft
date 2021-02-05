@@ -41,6 +41,7 @@ try:
     from raft.states.candidate import Candidate
     from raft.states.leader import Leader
     from raft.states.follower import Follower
+    from raft.states.learner import Learner
 
     DISABLE_CONSENSUS = False
 except Exception as e:
@@ -54,7 +55,7 @@ exit_event = threading.Event()
 class ZRENode:
     GROUP = "raft"
 
-    def __init__(self, name, board=None):
+    def __init__(self, name, board=None, learner=False):
         self.peers = {}
         self.directory = {}  # peer by name. Should use consensus to maintain
         self.signal = None
@@ -65,8 +66,8 @@ class ZRENode:
             opts = {}
             if board == "db":
                 opts["messageBoard"] = DBBoard(prefix=f"/tmp/{name}")
-
-            self.consensus = Raft(name, Follower(), self.n, **opts)
+            role = Learner() if learner else Follower()
+            self.consensus = Raft(name, role, self.n, **opts)
         self.groups = defaultdict(list)
         self.queue = asyncio.Queue()
         self.ctx = zmq.asyncio.Context()
@@ -370,6 +371,7 @@ def main():
     parser.add_argument("-n", "--name", help="chat client name")
     parser.add_argument("-v", "--verbose", help="verbose logging")
     parser.add_argument("-b", "--board", default="db", help="type of message board")
+    parser.add_argument("-l", "--learner", help="if I should be a learner or follower")
 
     args, rest = parser.parse_known_args()
     # Create a StreamHandler for debugging
@@ -381,7 +383,7 @@ def main():
     logger.addHandler(logging.StreamHandler())
     logger.propagate = False
 
-    node = ZRENode(args.name, args.board)
+    node = ZRENode(args.name, args.board, args.learner)
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(async_main(node.pipe1, node))
