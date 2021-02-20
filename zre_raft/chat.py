@@ -58,6 +58,7 @@ class ZRENode:
     def __init__(self, name, board=None, learner=False):
         self.peers = {}
         self.directory = {}  # peer by name. Should use consensus to maintain
+        self.blocked = set()  # set of peers from whom we don't what to hear
         self.signal = None
         self.create_node(name)
         if DISABLE_CONSENSUS:
@@ -130,6 +131,24 @@ class ZRENode:
             value = await self.consensus.get(key)
             if value is not None:
                 print(value)
+        elif cmd == "/block":
+            try:
+                peer = rest
+                peer_uuid = uuid.UUID(rest)
+                if peer_uuid not in self.peers.keys():
+                    print(f"{peer} not known")
+                    print(f"{self.peers.keys()}")
+                self.blocked.add(peer)
+            except Exception as e:
+                print(e)
+        elif cmd == "/unblock":
+            try:
+                peer = rest
+                if peer not in self.blocked:
+                    print(f"{peer} not currently blocked")
+                self.blocked.remove(peer)
+            except Exception as e:
+                print(e)
         elif cmd == "/encrypt":
             if DISABLE_SIGNAL:
                 print("Encryption disabled. Can't encrypt")
@@ -246,6 +265,9 @@ class ZRENode:
 
     async def handle_shout(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
+        if str(peer) in self.blocked:
+            logger.debug(f"dropping message from {peer}")
+            return
         name = cmds.pop(0).decode("utf-8")
         group = cmds.pop(0).decode("utf-8")
         raw_message = cmds.pop(0)
@@ -262,6 +284,9 @@ class ZRENode:
 
     async def handle_whisper(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
+        if str(peer) in self.blocked:
+            logger.debug(f"dropping message from {peer}")
+            return
         name = cmds.pop(0).decode("utf-8")
         raw_message = cmds.pop(0)
         if raw_message and raw_message[0] == ord("/"):
