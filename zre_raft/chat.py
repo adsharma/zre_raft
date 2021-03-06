@@ -55,7 +55,8 @@ exit_event = threading.Event()
 class ZRENode:
     GROUP = "raft"
 
-    def __init__(self, name, board=None, learner=False):
+    def __init__(self, name, groups, board=None, learner=False):
+        self.groups_joined = set(groups) if groups is not None else set()
         self.peers = {}
         self.directory = {}  # peer by name. Should use consensus to maintain
         self.blocked = set()  # set of peers from whom we don't what to hear
@@ -98,6 +99,8 @@ class ZRENode:
             self.peer_keys = self.signal.peer_keys
             self.create_signal_headers()
         n.join(ZRENode.GROUP)
+        for g in self.groups_joined:
+            n.join(g)
         n.start()
         return n
 
@@ -119,6 +122,13 @@ class ZRENode:
                 self.n.whisper(target, rest.encode("utf-8"))
             else:
                 print("syntax: /whisper peer message")
+        if cmd == "/shout":
+            out = rest.split(" ", maxsplit=1)
+            if len(out) == 2:
+                group, rest = out
+                self.n.shout(group, rest.encode("utf-8"))
+            else:
+                print("syntax: /group name message")
         elif cmd == "/set":
             out = rest.split(" ", maxsplit=1)
             if len(out) == 2:
@@ -346,7 +356,8 @@ class ZRENode:
         self.peers.pop(peer, None)
         print(f"{peer} exit ")
         for g in self.groups:
-            self.groups[g].remove(peer)
+            if peer in self.groups[g]:
+                self.groups[g].remove(peer)
             if self.consensus:
                 self.consensus.remove_neighbor(peer.hex)
         logger.debug(f"Config: {self.peers}, {self.groups}")
@@ -394,6 +405,7 @@ def main():
     global logger
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--name", help="chat client name")
+    parser.add_argument("-g", "--groups", action="append", help="which groups to join")
     parser.add_argument("-v", "--verbose", help="verbose logging")
     parser.add_argument("-b", "--board", default="db", help="type of message board")
     parser.add_argument("-l", "--learner", help="if I should be a learner or follower")
@@ -408,7 +420,7 @@ def main():
     logger.addHandler(logging.StreamHandler())
     logger.propagate = False
 
-    node = ZRENode(args.name, args.board, args.learner)
+    node = ZRENode(args.name, args.groups, args.board, args.learner)
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(async_main(node.pipe1, node))
