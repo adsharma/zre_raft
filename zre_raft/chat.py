@@ -68,7 +68,7 @@ class ZRENode:
             if board == "db":
                 opts["messageBoard"] = DBBoard(prefix=f"/tmp/{name}")
             role = Learner() if learner else Follower()
-            self.consensus = Raft(name, role, self.n, **opts)
+            self.consensus = Raft(ZRENode.GROUP, name, role, self.n, **opts)
         self.groups = defaultdict(list)
         self.queue = asyncio.Queue()
         self.ctx = zmq.asyncio.Context()
