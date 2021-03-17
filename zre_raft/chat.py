@@ -77,6 +77,7 @@ class ZRENode:
         self.session = PromptSession(f"{self.n.name()} {self.GROUP}: ")
         self.pending_messages = {}
 
+        self.tasks = []
         self.threads = []
         t = threading.Thread(target=self.worker, args=[self.pipe2, self.queue])
         self.threads.append(t)
@@ -133,7 +134,7 @@ class ZRENode:
             out = rest.split(" ", maxsplit=1)
             if len(out) == 2:
                 key, value = out
-                await self.consensus.set(key, value)
+                return await self.consensus.set(key, value)
             else:
                 print("syntax: /set key value")
         elif cmd == "/get":
@@ -229,7 +230,9 @@ class ZRENode:
                 message = raw_message.decode("utf-8")
                 if message and message[0] == "/":
                     # special commands
-                    await self.handle_outgoing_command(raw_message)
+                    task = await self.handle_outgoing_command(raw_message)
+                    if task is not None:
+                        self.tasks.append(task)
                 else:
                     n.shouts(ZRENode.GROUP, message)
             else:
@@ -240,9 +243,8 @@ class ZRENode:
         queue.put_nowait(None)
 
     def worker(self, pipe, queue):
-        global worker_loop
         n = self.n
-        worker_loop = loop = asyncio.new_event_loop()
+        self.worker_loop = loop = asyncio.new_event_loop()
         task = loop.create_task(self.chat_task(pipe, queue))
         loop.run_until_complete(task)
 
@@ -363,7 +365,7 @@ class ZRENode:
         logger.debug(f"Config: {self.peers}, {self.groups}")
 
     async def networkstream(self, queue):
-        seq = 0
+        loop = asyncio.get_event_loop()
         while True:
             item = await self.queue.get()
             if item is None:
@@ -372,9 +374,7 @@ class ZRENode:
             msg_type = cmds.pop(0)
             msg_type = msg_type.decode("utf-8")
             meth = getattr(self, f"handle_{msg_type.lower()}")
-            await meth(cmds)
-            yield (seq, item)
-            seq += 1
+            loop.create_task(meth(cmds))
 
 
 async def readline(session):
@@ -382,23 +382,47 @@ async def readline(session):
     while True:
         with patch_stdout():
             line = await session.prompt_async()
-        yield (seq, bytes(line, "utf-8"))
-        seq += 1
+        yield bytes(line, "utf-8")
 
 
-async def async_main(pipe, node):
-    queue = node.queue
+async def network_loop(event, args):
+    thread = threading.current_thread()
+    thread.loop = loop = asyncio.get_event_loop()
+    thread.node = node = ZRENode(args.name, args.groups, args.board, args.learner)
+    task = loop.create_task(node.networkstream(node.queue))
+    event.set()
+    await task
 
-    last_seq = -1
-    merged = ziplatest(readline(node.session), node.networkstream(queue))
-    async with aitercontext(merged) as safe_merged:
-        async for out in safe_merged:
-            msg, nmsg = out
-            if msg:
-                seq, msg = msg
-                if seq != last_seq:
-                    pipe.send(msg)
-                    last_seq = seq
+
+def network_worker(event: threading.Event, args):
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(network_loop(event, args))
+
+
+async def read_loop(network_thread):
+    node = network_thread.node
+    loop = network_thread.loop
+
+    def wait_for_consensus():
+        while node.tasks:
+            (coro, arg) = node.tasks.pop()
+            future = asyncio.run_coroutine_threadsafe(coro(arg), loop)
+            node.consensus._condition_event.wait(timeout=3)
+
+    async for msg in readline(node.session):
+        if msg:
+            node.pipe1.send(msg)
+        wait_for_consensus()
+
+
+async def async_main(args):
+    node_created_event = threading.Event()
+    network_thread = threading.Thread(
+        target=network_worker, args=[node_created_event, args]
+    )
+    network_thread.start()
+    node_created_event.wait()
+    await read_loop(network_thread)
 
 
 def main():
@@ -420,10 +444,9 @@ def main():
     logger.addHandler(logging.StreamHandler())
     logger.propagate = False
 
-    node = ZRENode(args.name, args.groups, args.board, args.learner)
     loop = asyncio.get_event_loop()
     try:
-        loop.run_until_complete(async_main(node.pipe1, node))
+        loop.run_until_complete(async_main(args))
     except KeyboardInterrupt:
         exit_event.set()
 
