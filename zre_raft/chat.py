@@ -407,8 +407,8 @@ async def read_loop(network_thread):
 
     def wait_for_consensus():
         while node.tasks:
-            (coro, arg) = node.tasks.pop()
-            future = asyncio.run_coroutine_threadsafe(coro(arg), loop)
+            (coro, expected_index, expected_id) = node.tasks.pop()
+            future = asyncio.run_coroutine_threadsafe(coro(expected_index, expected_id), loop)
             node.consensus._condition_event.wait(timeout=3)
 
     async for msg in readline(node.session):
