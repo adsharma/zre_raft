@@ -16,6 +16,7 @@ from prompt_toolkit.shortcuts import PromptSession
 import argparse
 import asyncio
 import base64
+import dbm
 import json
 import logging
 import random
@@ -66,6 +67,7 @@ class ZRENode:
             self.consensus = None
         else:
             opts = {}
+            opts["stable_storage"] = dbm.open(f"/tmp/{name}-raft.db", "cs")
             if board == "db":
                 opts["messageBoard"] = DBBoard(prefix=f"/tmp/{name}")
             role = Learner() if learner else Follower()
