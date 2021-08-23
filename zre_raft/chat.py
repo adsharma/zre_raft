@@ -3,19 +3,12 @@
 
 try:
     from zyre_pyzmq import Zyre as Pyre  # type: ignore
-except Exception as e:
+except ModuleNotFoundError:
     print("using Python native module")
     from pyre import Pyre
 
-from aiostream.stream import ziplatest
-from aiostream.aiter_utils import aitercontext
-from collections import defaultdict
-from prompt_toolkit.patch_stdout import patch_stdout
-from prompt_toolkit.shortcuts import PromptSession
-
 import argparse
 import asyncio
-import base64
 import dbm
 import json
 import logging
@@ -23,10 +16,13 @@ import random
 import sys
 import threading
 import uuid
+from collections import defaultdict
 
 import zmq
 import zmq.asyncio
 import zre_raft
+from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.shortcuts import PromptSession
 
 try:
     from zre_raft.zre_signal import b64k, SignalState
@@ -39,8 +35,6 @@ except Exception as e:
 try:
     from raft.boards.db_board import DBBoard
     from raft.servers.zre_server import ZREServer as Raft
-    from raft.states.candidate import Candidate
-    from raft.states.leader import Leader
     from raft.states.follower import Follower
     from raft.states.learner import Learner
 
@@ -245,7 +239,6 @@ class ZRENode:
         queue.put_nowait(None)
 
     def worker(self, pipe, queue):
-        n = self.n
         self.worker_loop = loop = asyncio.new_event_loop()
         task = loop.create_task(self.chat_task(pipe, queue))
         loop.run_until_complete(task)
@@ -267,7 +260,7 @@ class ZRENode:
         while True:
             try:
                 frontend.bind(endpoint)
-            except:
+            except Exception:
                 endpoint = "inproc://zactor-%04x-%04x\n" % (
                     random.randint(0, 0x10000),
                     random.randint(0, 0x10000),
@@ -360,7 +353,7 @@ class ZRENode:
 
     async def handle_exit(self, cmds):
         peer = uuid.UUID(bytes=cmds.pop(0))
-        name = cmds.pop(0).decode("utf-8")
+        _name = cmds.pop(0).decode("utf-8")  # noqa: unused
         self.peers.pop(peer, None)
         print(f"{peer} exit ")
         for g in self.groups:
@@ -384,7 +377,6 @@ class ZRENode:
 
 
 async def readline(session):
-    seq = 0
     while True:
         with patch_stdout():
             line = await session.prompt_async()
@@ -423,7 +415,7 @@ async def read_loop(network_thread):
                 (coro, expected_index, expected_id) = task
             if coro is None:
                 continue
-            future = asyncio.run_coroutine_threadsafe(
+            _future = asyncio.run_coroutine_threadsafe(  # noqa: unused
                 coro(expected_index, expected_id), loop
             )
             node.consensus._condition_event.wait(timeout=3)
