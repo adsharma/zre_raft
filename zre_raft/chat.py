@@ -340,7 +340,9 @@ class ZRENode:
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].append(peer)
         if self.consensus:
-            self.consensus.add_neighbor(peer.hex)
+            task = self.consensus.add_neighbor(peer.hex)
+            if task is not None:
+                self.tasks.append(task)
         print(f"{name} {peer} joined {group}")
         logger.debug(f"Config: {self.peers}, {self.groups}")
 
@@ -350,7 +352,9 @@ class ZRENode:
         group = cmds.pop(0).decode("utf-8")
         self.groups[group].remove(peer)
         if self.consensus:
-            self.consensus.remove_neighbor(peer.hex)
+            task = self.consensus.remove_neighbor(peer.hex)
+            if task is not None:
+                self.tasks.append(task)
         print(f"{name} {peer} left {group}")
         print(f"{peer} left {group}")
 
@@ -407,8 +411,21 @@ async def read_loop(network_thread):
 
     def wait_for_consensus():
         while node.tasks:
-            (coro, expected_index, expected_id) = node.tasks.pop()
-            future = asyncio.run_coroutine_threadsafe(coro(expected_index, expected_id), loop)
+            task = node.tasks.pop()
+            coro = None
+            if isinstance(task, asyncio.Task):
+                if task.done():
+                    # TODO: simplify this chaining by potentially using another coroutine
+                    res = task.result()
+                    if isinstance(res, tuple):
+                        (coro, expected_index, expected_id) = res
+            else:
+                (coro, expected_index, expected_id) = task
+            if coro is None:
+                continue
+            future = asyncio.run_coroutine_threadsafe(
+                coro(expected_index, expected_id), loop
+            )
             node.consensus._condition_event.wait(timeout=3)
 
     async for msg in readline(node.session):
